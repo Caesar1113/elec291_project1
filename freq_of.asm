@@ -281,79 +281,92 @@ mode1:
     ；按钮1可以正式进入游戏
     ；如果没有按下按钮1，那么就会继续等待，在等待过程中去选择玩家人数
     ；（进入游戏）
+    ；MODE2 开始游戏
     mov a,#0x02
     mov mode,a
     ljmp mode1_d
 
 mode1_a:
-    ;选择人数
-    jb      BUTTON_2,       mode1_b
+    ;选择人数 2人模式
+
+    mov a,#2 
+    mov number, a
+    Set_Cursor(2, 1)
+    Send_Constant_String(#number1)
+    jb      BUTTON_2,       mode1_a
     Wait_Milli_Seconds(#DEBOUNCE_DELAY)
-    jb      BUTTON_2,       mode1_b
+    jb      BUTTON_2,       mode1_a
     jnb     BUTTON_2,       $
     ; valid button 2: change position
-    mov     a,  cursor_pos
-    cjne    a,  #0x02,  mode1_a_inc
-    mov     cursor_pos,  #0x00
-    ljmp    mode1_d
+    
+    ljmp mode1_b
 
 mode1_d:
     ljmp forever
 
-mode1_a:
+mode1_b:
+ ;选择人数 三人模式
+
+    mov a, #3
+    mov number,a
+    Set_Cursor(2, 1)
+    Send_Constant_String(#number1)
     jb      BUTTON_2,       mode1_b
     Wait_Milli_Seconds(#DEBOUNCE_DELAY)
     jb      BUTTON_2,       mode1_b
     jnb     BUTTON_2,       $
     ; valid button 2: change position
-    mov     a,  cursor_pos
-    cjne    a,  #0x02,  mode1_a_inc
-    mov     cursor_pos,  #0x00
-    ljmp    mode1_d
+    
+    ljmp mode1_a
+
+   ; mov     a,  cursor_pos
+   ; cjne    a,  #0x02,  mode1_a_inc
+    ;mov     cursor_pos,  #0x00
+    ;ljmp    mode1_d
     
 mode1_a_inc:
     inc     cursor_pos
     ljmp    mode1_d
 
-mode1_b:
+mode2:
+；游戏开始
+；先从c里面取值比较，判断是几人模式
+    clr		c
+    mov 	  a, number
+    subb      a, #0x02
+    jnz		loop_not2players	
+    ; if number == 2
+    ljmp	mode2_2
+    ;两人模式进入mode2_2
 
+loop_not2players:
+    clr c
+    mov a, number
+    subb a, #0x03
+    jnz  loop_not3players
+    ljmp    mode2_3
+    ;三人模式进入mode2_3
 
+loop_not3players:
+    mov a,#0x00
+    mov  number,0
+    ljmp mode0_d  
 
+    ;defualt 重开
 
-    jb   BUTTON_1, mode1_3
-    Wait_Milli_Seconds(#DEBOUNCE_DELAY)
-    jb      BUTTON_1,   mode1_3
-    jnb    BUTTON_1,   $
-    
-    
+;==[2 Players]==
+mode2_2:
+    Set_Cursor(1, 1)
+    Send_Constant_String(#game_mode1)
+    Set_Cursor(1, 2)
+    Send_Constant_String(#game_mode1_2_2)
 
-
-    ;button 2 pressed so we go to mode1_2_1    two players mode
-    jnb    TR0, mode1_2
-    clr    TR0
-    sjmp  mode0_d
-
-mode1_3:
-
-    Set_Cursor(2,1)
-    Send_Constant_String(#number2)
-
-    jb   BUTTON_1, mode0_b
-    Wait_Milli_Seconds(#DEBOUNCE_DELAY)
-    jb      BUTTON_1,   mode0_b
-    jnb    BUTTON_1,   $
-
-    jb   BUTTON_2, mode1_3
-    Wait_Milli_Seconds(#DEBOUNCE_DELAY)
-    jb      BUTTON_2,   mode1_3
-    jnb    BUTTON_2,   $
-
-
-mode1_2_1:
-
-mode0_a:
-    SETB TR2
-    jb   BUTTON_1, mode0_b
+;==[3 Players]==
+mode2_3:
+    Set_Cursor(1, 1)
+    Send_Constant_String(#game_mode1)
+    Set_Cursor(1, 2)
+    Send_Constant_String(#game_mode1_2_3)
 
 
 
