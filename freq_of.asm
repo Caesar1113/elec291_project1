@@ -19,6 +19,12 @@ LCD_D5 equ P3.5
 LCD_D6 equ P3.6
 LCD_D7 equ P3.7
 
+BUTTON_BOOT   equ P4.5
+BUTTON_1      equ         ;move ^
+BUTTON_2      equ         ;selecting player 
+BUTTON_3      equ
+
+
 $NOLIST
 $include(LCD_4bit.inc) ; A library of LCD related functions and utility macros
 $LIST
@@ -28,11 +34,16 @@ dseg at 0x30
 Timer2_overflow: ds 1 ; 8-bit overflow to measure the frequency of fast signals (over 65535Hz)
 player1_socre: ds 1
 player2_socre: ds 1
+cursor_pos   : ds 1
+mode         : ds 1
+
 
 cseg
 ;                     1234567890123456    <- This helps determine the location of the counter
 Initial_Message:  db '   Game time!  ', 0
 player_numbers:   db '     2   3     ', 0
+number1:          db '     ^         ', 0
+number2:          db '         ^     ', 0
 game_mode1:       db 'play1: ,play2: ', 0
 game_mode1_2_1:   db 'fighting!      ', 0
 game_mode1_2_2:   db 'play3:         ', 0
@@ -40,6 +51,10 @@ game_mode2:       db 'winner:        ', 0
 ; When using a 22.1184MHz crystal in fast mode
 ; one cycle takes 1.0/22.1184MHz = 45.21123 ns
 ; (tuned manually to get as close to 1s as possible)
+
+
+
+
 Wait1s:
     mov R2, #176
 X3: mov R1, #250
@@ -195,6 +210,11 @@ MyProgram:
 
 forever:
 ;determine mode
+;mode 0 waiting for game to start
+;mode 1 game start
+;mode 2 two people mode
+;mode 3 three people mode
+
     clr  c
     mov  a,mode
     jz   mode0        ;a=0 go to mode0
@@ -203,11 +223,141 @@ forever:
     ljmp mode1
 
 loop_mode1:   
+    clr  c
+    mov  a,mode
+    subb a,#0x02
+    jnz  loop_notmode2
+    ljmp mode2      ;if mode==2
+    
+loop_notmode2:
+    clr c
+    mov a,mode
+    subb a,#0x03
+    jnz loop_notmode3
+    ljmp mode3      ;if mode==3
+
+loop_notmode3:
+    ;reset mode back to 0
+    mov a,#0x00
+    mov mode,a
+    ljmp mode0_d
+
+mode0:
+    jb BUTTON_BOOT, mode0_a  ; if the 'BOOT' button is not pressed skip
+    Wait_Milli_Seconds(#DEBOUNCE_DELAY)
+    jb     	BUTTON_BOOT, mode0_a
+    jnb    	BUTTON_BOOT, $	
+;wait for the to release The '$' means: jump to same instruction.
+;goes into game mode1,shows the number of players choosing screen
+   ;如果boot被按了，那么会进入mode1，如果不被按就会走mode0_a
+    clr a
+    mov cursor_pos,a
+    ;setup screen
+    Set_Cursor(1,1)
+    Send_Constant_String(#player_numbers)
+    Set_Cursor(2,1)
+    Send_Constant_String(#number1)
+    ;change mode
+    mov a,#0x01
+    mov mode,a
+    ljmp mode0_d
+
+mode0_a:
+    ;mode0_a要做什么，什么都不做，跳回去判断处在什么mode
+    ljmp forever
+mode0_d:
+    ；同mode0_a
+    ljmp forever
+mode1:
+
+    ;一旦进入了mode1，说明游戏开始了，要开始选择游戏人数
+    ;choose the number of players to play
+    ;SETB TR2
+    jb      BUTTON_1,       mode1_a
+    Wait_Milli_Seconds(#DEBOUNCE_DELAY)
+    jb      BUTTON_1,       mode1_a
+    jnb     BUTTON_1,       $
+    ; valid button 1: game start！
+    ；按钮1可以正式进入游戏
+    ；如果没有按下按钮1，那么就会继续等待，在等待过程中去选择玩家人数
+    ；（进入游戏）
+    mov a,#0x02
+    mov mode,a
+    ljmp mode1_d
+
+mode1_a:
+    ;选择人数
+    jb      BUTTON_2,       mode1_b
+    Wait_Milli_Seconds(#DEBOUNCE_DELAY)
+    jb      BUTTON_2,       mode1_b
+    jnb     BUTTON_2,       $
+    ; valid button 2: change position
+    mov     a,  cursor_pos
+    cjne    a,  #0x02,  mode1_a_inc
+    mov     cursor_pos,  #0x00
+    ljmp    mode1_d
+
+mode1_d:
+    ljmp forever
+
+mode1_a:
+    jb      BUTTON_2,       mode1_b
+    Wait_Milli_Seconds(#DEBOUNCE_DELAY)
+    jb      BUTTON_2,       mode1_b
+    jnb     BUTTON_2,       $
+    ; valid button 2: change position
+    mov     a,  cursor_pos
+    cjne    a,  #0x02,  mode1_a_inc
+    mov     cursor_pos,  #0x00
+    ljmp    mode1_d
+    
+mode1_a_inc:
+    inc     cursor_pos
+    ljmp    mode1_d
+
+mode1_b:
+
+
+
+
+    jb   BUTTON_1, mode1_3
+    Wait_Milli_Seconds(#DEBOUNCE_DELAY)
+    jb      BUTTON_1,   mode1_3
+    jnb    BUTTON_1,   $
     
     
-    
-    
-    
+
+
+    ;button 2 pressed so we go to mode1_2_1    two players mode
+    jnb    TR0, mode1_2
+    clr    TR0
+    sjmp  mode0_d
+
+mode1_3:
+
+    Set_Cursor(2,1)
+    Send_Constant_String(#number2)
+
+    jb   BUTTON_1, mode0_b
+    Wait_Milli_Seconds(#DEBOUNCE_DELAY)
+    jb      BUTTON_1,   mode0_b
+    jnb    BUTTON_1,   $
+
+    jb   BUTTON_2, mode1_3
+    Wait_Milli_Seconds(#DEBOUNCE_DELAY)
+    jb      BUTTON_2,   mode1_3
+    jnb    BUTTON_2,   $
+
+
+mode1_2_1:
+
+mode0_a:
+    SETB TR2
+    jb   BUTTON_1, mode0_b
+
+
+
+
     ; Measure the frequency applied to pin T2
     clr TR2 ; Stop counter 2
     clr a
