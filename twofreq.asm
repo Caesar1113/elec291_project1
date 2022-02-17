@@ -2,19 +2,26 @@ $NOLIST
 $MODLP51
 $LIST
 
-TIMER0_RELOAD_L DATA 0xf2
-TIMER1_RELOAD_L DATA 0xf3
-TIMER0_RELOAD_H DATA 0xf4
-TIMER1_RELOAD_H DATA 0xf5
-
-
 org 0000H
    ljmp MyProgram
-org 0x000B
-	ljmp Timer0_ISR
+   
 ; Timer/Counter 2 overflow interrupt vector
 org 0x002B
 	ljmp Timer2_ISR
+
+; These register definitions needed by 'math32.inc'
+DSEG at 30H
+x:   ds 4
+y:   ds 4
+bcd: ds 5
+T2ov: ds 2 ; 16-bit timer 2 overflow (to measure the period of very slow signals)
+
+BSEG
+mf: dbit 1
+
+$NOLIST
+$include(math32.inc)
+$LIST
 
 cseg
 ; These 'equ' must match the hardware wiring
@@ -26,214 +33,63 @@ LCD_D5 equ P3.5
 LCD_D6 equ P3.6
 LCD_D7 equ P3.7
 
+BUTTON equ P4.5
+
 $NOLIST
 $include(LCD_4bit.inc) ; A library of LCD related functions and utility macros
 $LIST
 
-; In the 8051 we can define direct access variables starting at location 0x30 up to location 0x7F
-dseg at 0x30
-Timer2_overflow: ds 1 ; 8-bit overflow to measure the frequency of fast signals (over 65535Hz)
-Timer0_overflow: ds 1
-cseg
 ;                     1234567890123456    <- This helps determine the location of the counter
-Initial_Message:  db 'Frequency (Hz): ', 0
+Initial_Message1:  db 'freq1:', 0
+Initial_Message2:  db 'freq2:', 0
+No_Signal_Str:    db 'No signal      ', 0
 
-; When using a 22.1184MHz crystal in fast mode
-; one cycle takes 1.0/22.1184MHz = 45.21123 ns
-; (tuned manually to get as close to 1s as possible)
-Wait1s:
-    mov R2, #176
-X3: mov R1, #250
-X2: mov R0, #166
-X1: djnz R0, X1 ; 3 cycles->3*45.21123ns*166=22.51519us
-    djnz R1, X2 ; 22.51519us*250=5.629ms
-    djnz R2, X3 ; 5.629ms*176=1.0s (approximately)
-    ret
+; Sends 10-digit BCD number in bcd to the LCD
 
-;Initializes timer/counter 2 as a 16-bit counter
+WaitHalfSec: 
+    mov R2, #40 
+a3: mov R1, #250 
+a2: mov R0, #166 
+a1: djnz R0, a1 ; 3 cycles->3*45.21123ns*166=22.51519us 
+    djnz R1, a2 ; 22.51519us*250=5.629ms 
+    djnz R2, a3 ; 5.629ms*89=0.5s (approximately) 
+    ret 
+
+Display_10_digit_BCD:
+	Display_BCD(bcd+4)
+	Display_BCD(bcd+3)
+	Display_char(#'.')
+	Display_BCD(bcd+2)
+	Display_BCD(bcd+1)
+	ret
+
+;Initializes timer/counter 2 as a 16-bit timer
 InitTimer2:
-	mov T2CON, #0b_0000_0010 ; Stop timer/counter.  Set as counter (clock input is pin T2).
+	mov T2CON, #0 ; Stop timer/counter.  Set as timer (clock input is pin 22.1184MHz).
 	; Set the reload value on overflow to zero (just in case is not zero)
 	mov RCAP2H, #0
 	mov RCAP2L, #0
-    setb P1.0 ; P1.0 is connected to T2.  Make sure it can be used as input.
-    setb ET2
+	setb ET2
     ret
-InitTimer0:
-	mov TCON, #0b_0011_0000;Stop timer/counter.  Set as counter (clock input is pin T2).
-	; Set the reload value on overflow to zero (just in case is not zero)
-	mov TH0, #0
-	mov TL0, #0
-    setb P1.1 ; P1.0 is connected to T2.  Make sure it can be used as input.
-    setb ET0
-    ret
-
 
 Timer2_ISR:
 	clr TF2  ; Timer 2 doesn't clear TF2 automatically. Do it in ISR
-	inc Timer2_overflow
+	push acc
+	inc T2ov+0
+	mov a, T2ov+0
+	jnz Timer2_ISR_done
+	inc T2ov+1
+Timer2_ISR_done:
+	pop acc
 	reti
-Timer0_ISR:
-	clr TF0  ; Timer 2 doesn't clear TF2 automatically. Do it in ISR
-	inc Timer0_overflow
-	reti
-
-
-
-;Converts the hex number in Timer2_overflow-TH2-TL2 to BCD in R3-R2-R1-R0
-hex2bcd:
-	clr a
-    mov R0, #0  ;Set BCD result to 00000000 
-    mov R1, #0
-    mov R2, #0
-    mov R3, #0
-    mov R4, #24 ;Loop counter.
-
-hex2bcd_loop:
-    mov a, TL2 ;Shift TH0-TL0 left through carry
-    rlc a
-    mov TL2, a
-    
-    mov a, TH2
-    rlc a
-    mov TH2, a
-
-    mov a, Timer2_overflow
-    rlc a
-    mov Timer2_overflow, a
-      
-	; Perform bcd + bcd + carry
-	; using BCD numbers
-	mov a, R0
-	addc a, R0
-	da a
-	mov R0, a
-	
-	mov a, R1
-	addc a, R1
-	da a
-	mov R1, a
-	
-	mov a, R2
-	addc a, R2
-	da a
-	mov R2, a
-	
-	mov a, R3
-	addc a, R3
-	da a
-	mov R3, a
-	
-	djnz R4, hex2bcd_loop
-	ret
-	
-	
-; Dumps the 8-digit packed BCD number in R2-R1-R0 into the LCD
-hex0bcd:
-	clr a
-    mov R0, #0  ;Set BCD result to 00000000 
-    mov R1, #0
-    mov R2, #0
-    mov R3, #0
-    mov R4, #24 ;Loop counter.
-
-hex0bcd_loop:
-   
-	
-	mov a, TL0 ;Shift TH0-TL0 left through carry
-    rlc a
-    mov TL0, a
-    
-    mov a, TH0
-    rlc a
-    mov TH0, a
-
-    mov a, Timer0_overflow
-    rlc a
-    mov Timer0_overflow, a
-      
-	; Perform bcd + bcd + carry
-	; using BCD numbers
-	mov a, R0
-	addc a, R0
-	da a
-	mov R0, a
-	
-	mov a, R1
-	addc a, R1
-	da a
-	mov R1, a
-	
-	mov a, R2
-	addc a, R2
-	da a
-	mov R2, a
-	
-	mov a, R3
-	addc a, R3
-	da a
-	mov R3, a
-	
-	djnz R4, hex0bcd_loop
-	ret
-
-; Dumps the 8-digit packed BCD number in R2-R1-R0 into the LCD
-DisplayBCD_LCD:
-	; 8th digit:
-    mov a, R3
-    swap a
-    anl a, #0FH
-    orl a, #'0' ; convert to ASCII
-	lcall ?WriteData
-	; 6th digit:
-    mov a, R3
-    anl a, #0FH
-    orl a, #'0' ; convert to ASCII
-	lcall ?WriteData
-	; 6th digit:
-    mov a, R2
-    swap a
-    anl a, #0FH
-    orl a, #'0' ; convert to ASCII
-	lcall ?WriteData
-	; 5th digit:
-    mov a, R2
-    anl a, #0FH
-    orl a, #'0' ; convert to ASCII
-	lcall ?WriteData
-	; 4th digit:
-    mov a, R1
-    swap a
-    anl a, #0FH
-    orl a, #'0' ; convert to ASCII
-	lcall ?WriteData
-	; 3rd digit:
-    mov a, R1
-    anl a, #0FH
-    orl a, #'0' ; convert to ASCII
-	lcall ?WriteData
-	; 2nd digit:
-    mov a, R0
-    swap a
-    anl a, #0FH
-    orl a, #'0' ; convert to ASCII
-	lcall ?WriteData
-	; 1st digit:
-    mov a, R0
-    anl a, #0FH
-    orl a, #'0' ; convert to ASCII
-	lcall ?WriteData
-    
-    ret
 
 ;---------------------------------;
 ; Hardware initialization         ;
 ;---------------------------------;
 Initialize_All:
     lcall InitTimer2
-    lcall InitTimer0
     lcall LCD_4BIT ; Initialize LCD
-    setb EA ; Enable interrrupts
+    setb EA
 	ret
 
 ;---------------------------------;
@@ -243,41 +99,168 @@ MyProgram:
     ; Initialize the hardware:
     mov SP, #7FH
     lcall Initialize_All
-
-
-    
+    setb P1.1 ; Pin is used as input
+	setb P1.0; Pin is used as input
+	Set_Cursor(1, 1)
+    Send_Constant_String(#Initial_Message1)
+   	Set_Cursor(2, 1)
+    Send_Constant_String(#Initial_Message2)
 forever:
-    ; Measure the frequency applied to pin T2
-    clr TR2 ; Stop counter 2
-    clr a
-    mov TL2, a
-    mov TH2, a
-    mov Timer2_overflow, a
+    ; synchronize with rising edge of the signal applied to pin P0.0
+    clr TR2 ; Stop timer 2
+    mov TL2, #0
+    mov TH2, #0
+    mov T2ov+0, #0
+    mov T2ov+1, #0
     clr TF2
-    setb TR2 ; Start counter 2
-    lcall Wait1s ; Wait one second
-    clr TR2 ; Stop counter 2, TH2-TL2 has the frequency
+    setb TR2
+synch1:
+	mov a, T2ov+1
+	anl a, #0xfe
+	jnz no_signal ; If the count is larger than 0x01ffffffff*45ns=1.16s, we assume there is no signal
+    jb P1.1, synch1
+synch2:    
+	mov a, T2ov+1
+	anl a, #0xfe
+	jnz no_signal
+    jnb P1.1, synch2
+    
+    ; Measure the period of the signal applied to pin P0.0
+    clr TR2
+    mov TL2, #0
+    mov TH2, #0
+    mov T2ov+0, #0
+    mov T2ov+1, #0
+    clr TF2
+    setb TR2 ; Start timer 2
+measure1:
+	mov a, T2ov+1
+	anl a, #0xfe
+	jnz no_signal 
+    jb P1.1, measure1
+measure2:    
+	mov a, T2ov+1
+	anl a, #0xfe
+	jnz no_signal
+    jnb P1.1, measure2
+    clr TR2 ; Stop timer 2, [T2ov+1, T2ov+0, TH2, TL2] * 45.21123ns is the period
+
+	sjmp skip_this
+no_signal:	
+	Set_Cursor(2, 1)
+    Send_Constant_String(#No_Signal_Str)
+    ljmp forever ; Repeat! 
+skip_this:
+
+	; Make sure [T2ov+1, T2ov+2, TH2, TL2]!=0
+	mov a, TL2
+	orl a, TH2
+	orl a, T2ov+0
+	orl a, T2ov+1
+	jz no_signal
+	; Using integer math, convert the period to frequency:
+	mov x+0, TL2
+	mov x+1, TH2
+	mov x+2, T2ov+0
+	mov x+3, T2ov+1
+	Load_y(45) ; One clock pulse is 1/22.1184MHz=45.21123ns
+	lcall mul32
 
 	; Convert the result to BCD and display on LCD
-	Set_Cursor(1, 1)
+	; 1.44T = (RA+2Rb)*c
+	Load_y(3)        ;/(RA+2RB)  pass down to have whole number
+	lcall div32
+	Load_y(693)   
+	lcall div32
+	Load_y(1000)
+	lcall mul32 
+
+	Set_Cursor(1, 7)
 	lcall hex2bcd
-    lcall DisplayBCD_LCD
-   
-   lcall InitTimer0
+	lcall Display_10_digit_BCD
+
+clr TR2
+
+
+forever1:
+    ; synchronize with rising edge of the signal applied to pin P0.0
+    clr TR2 ; Stop timer 2
+    mov TL2, #0
+    mov TH2, #0
+    mov T2ov+0, #0
+    mov T2ov+1, #0
+    clr TF2
+    setb TR2
+synch3:
+	mov a, T2ov+1
+	anl a, #0xfe
+	jnz no_signal1 ; If the count is larger than 0x01ffffffff*45ns=1.16s, we assume there is no signal
+    jb P1.1, synch3
+synch4:    
+	mov a, T2ov+1
+	anl a, #0xfe
+	jnz no_signal1
+    jnb P1.0, synch4
     
-    clr TR0 ; Stop counter 2
-    clr a
-    mov TL0, a
-    mov TH0, a
-    mov Timer0_overflow, a
-    clr TF0
-    setb TR0 ; Start counter 2
-  
-    clr TR0 ; Stop counter 2, TH2-TL2 has the frequency
-    
-    Set_Cursor(2, 1)
-	lcall hex0bcd
-    lcall DisplayBCD_LCD
-    lcall wait1s
-    sjmp forever ; Repeat! 
+    ; Measure the period of the signal applied to pin P0.0
+    clr TR2
+    mov TL2, #0
+    mov TH2, #0
+    mov T2ov+0, #0
+    mov T2ov+1, #0
+    clr TF2
+    setb TR2 ; Start timer 2
+measure3:
+	mov a, T2ov+1
+	anl a, #0xfe
+	jnz no_signal1
+    jb P1.0, measure3
+measure4:    
+	mov a, T2ov+1
+	anl a, #0xfe
+	jnz no_signal1
+    jnb P1.2, measure4
+    clr TR2 ; Stop timer 2, [T2ov+1, T2ov+0, TH2, TL2] * 45.21123ns is the period
+
+	sjmp skip_this1
+no_signal1:	
+	Set_Cursor(2, 1)
+    Send_Constant_String(#No_Signal_Str)
+    ljmp forever1 ; Repeat! 
+skip_this1:
+
+	; Make sure [T2ov+1, T2ov+2, TH2, TL2]!=0
+	mov a, TL2
+	orl a, TH2
+	orl a, T2ov+0
+	orl a, T2ov+1
+	jz no_signal1
+	; Using integer math, convert the period to frequency:
+	mov x+0, TL2
+	mov x+1, TH2
+	mov x+2, T2ov+0
+	mov x+3, T2ov+1
+	Load_y(45) ; One clock pulse is 1/22.1184MHz=45.21123ns
+	lcall mul32
+
+	; Convert the result to BCD and display on LCD
+	; 1.44T = (RA+2Rb)*c
+	Load_y(9)        ;/(RA+2RB)  pass down to have whole number
+	lcall div32
+	Load_y(693)   
+	lcall div32
+	Load_y(1000)
+	lcall mul32 
+
+	Set_Cursor(2, 7)
+	lcall hex2bcd
+	lcall Display_10_digit_BCD
+
+lcall WaitHalfSec
+	
+
+jump_forever:
+    ljmp forever
+    ljmp forever1 ; Repeat! 
+clr TR2
 end
